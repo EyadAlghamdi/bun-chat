@@ -1,0 +1,17 @@
+{
+  "name": "backend",
+  "module": ".src/index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "bun --hot run ./src/index.ts"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "ksuid": "^3.0.0"
+  }
+}

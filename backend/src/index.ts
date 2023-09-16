@@ -1,46 +1,66 @@
-import { ServerWebSocket } from "bun";
 import KSUID from "ksuid"
+import AuthenticationController from "./AuthenticationController"
+import { headers } from "./conts/headers"
+import { getCookieByName } from "./utils/getCookieByName"
 
-const openSockets: ServerWebSocket<{ id: string; }>[] = []
 const PORT = 6969
 
-function sendToEveryone(data: { message: string | Buffer, isAutomated: boolean }) {
-  openSockets.forEach(ws => {
-    ws.send(JSON.stringify(data))
-  })
-}
-
-Bun.serve<{ id: string, username: string }>({
+const server = Bun.serve<{ id: string, username: string }>({
   port: PORT,
   async fetch(req, server) {
+    const url = new URL(req.url)
+    if (req.method === "OPTIONS") {
+      return new Response("", {
+        headers: headers
+      })
+    }
+
+    if (url.pathname === "/login" && req.method === "POST") {
+      return AuthenticationController.login(req)
+    }
+    if (url.pathname === "/logout" && req.method === "POST") {
+      return AuthenticationController.logout(req)
+    }
+
     // upgrade the request to websocket
     const uid = await KSUID.random()
-    const url = new URL(req.url)
-    const username = url.searchParams.get("username")
+    const cookie = req.headers.get("cookie")
+    const username = getCookieByName(cookie ?? "", "username")
+
     if (server.upgrade(req, { data: { id: uid.string, username } })) {
       return
     }
-    return new Response("Upgrade failed", { status: 500 })
+    return new Response("Upgrade failed", { status: 500, headers })
   },
   websocket: {
     open(ws) {
-      openSockets.push(ws)
-      const msg = `${ws.data.username} has entered the chat`
-      sendToEveryone({ message: msg, isAutomated: true })
+      const username = ws.data.username
+      if (!username) ws.close(4001, "Authroization failed")
+      ws.subscribe("general")
+      const payload = JSON.stringify({
+        message: `${ws.data.username} has entered the chat`,
+        isAutomated: true
+      })
+      server.publish("general", payload)
       // retrieve previous unread messages from db
     },
-    message(ws, message) {
-      sendToEveryone({ message: `${ws.data.username}: ${message}`, isAutomated: false })
+    message(ws, msg) {
+      const payload = JSON.stringify({
+        message: `${ws.data.username}: ${msg}`,
+        isAutomated: false
+      })
+      server.publish("general", payload)
       // persist data in db
     },
     close(ws, code, message) {
-      const msg = `${ws.data.username} has left the chat`
-      const uid = ws.data?.id
-      openSockets.splice(openSockets.findIndex(ws => ws.data.id === uid), 1)
-      sendToEveryone({ message: msg, isAutomated: true })
+      ws.unsubscribe("general")
+      const payload = JSON.stringify({
+        message: `${ws.data.username} has left the chat`,
+        isAutomated: true
+      })
+      server.publish("general", payload)
     },
   },
 })
-
 
 console.log(`listeninig to port: ${PORT}`)
